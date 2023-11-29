@@ -1,0 +1,105 @@
+library(lubridate)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+
+#import data
+Divvy_Trips_2014_Q1Q2 <- read_csv("Raw data/Trip data - CSV/2014/Divvy_Trips_2014_Q1Q2.csv")
+Divvy_Trips_2014_Q3_07 <- read_csv("Raw data/Trip data - CSV/2014/Divvy_Trips_2014-Q3-07.csv")
+Divvy_Trips_2014_Q3_0809 <- read_csv("Raw data/Trip data - CSV/2014/Divvy_Trips_2014-Q3-0809.csv")
+Divvy_Trips_2014_Q4 <- read_csv("Raw data/Trip data - CSV/2014/Divvy_Trips_2014-Q4.csv")
+
+#convert datetime and calculate duration
+#Q1Q2
+Divvy_Trips_2014_Q1Q2$starttime <- mdy_hm(Divvy_Trips_2014_Q1Q2$starttime)
+Divvy_Trips_2014_Q1Q2$stoptime <- mdy_hm(Divvy_Trips_2014_Q1Q2$stoptime)
+Divvy_Trips_2014_Q1Q2$duration <- Divvy_Trips_2014_Q1Q2$stoptime - Divvy_Trips_2014_Q1Q2$starttime
+#Q307
+Divvy_Trips_2014_Q3_07$starttime <- mdy_hm(Divvy_Trips_2014_Q3_07$starttime)
+Divvy_Trips_2014_Q3_07$stoptime <- mdy_hm(Divvy_Trips_2014_Q3_07$stoptime)
+Divvy_Trips_2014_Q3_07$duration <- Divvy_Trips_2014_Q3_07$stoptime - Divvy_Trips_2014_Q3_07$starttime
+#Q30809
+Divvy_Trips_2014_Q3_0809$starttime <- mdy_hm(Divvy_Trips_2014_Q3_0809$starttime)
+Divvy_Trips_2014_Q3_0809$stoptime <- mdy_hm(Divvy_Trips_2014_Q3_0809$stoptime)
+Divvy_Trips_2014_Q3_0809$duration <- Divvy_Trips_2014_Q3_0809$stoptime - Divvy_Trips_2014_Q3_0809$starttime
+#Q4
+Divvy_Trips_2014_Q4$starttime <- mdy_hm(Divvy_Trips_2014_Q4$starttime)
+Divvy_Trips_2014_Q4$stoptime <- mdy_hm(Divvy_Trips_2014_Q4$stoptime)
+Divvy_Trips_2014_Q4$duration <- Divvy_Trips_2014_Q4$stoptime - Divvy_Trips_2014_Q4$starttime
+
+#append data
+Divvy_Trips_2014 <- rbind(Divvy_Trips_2014_Q1Q2,Divvy_Trips_2014_Q3_07,Divvy_Trips_2014_Q3_0809,Divvy_Trips_2014_Q4)
+
+#clean duration: delete duration more than 1 day
+Divvy_Trips_2014$duration <- ifelse (add_with_rollback(Divvy_Trips_2014$starttime, days(1)) <= Divvy_Trips_2014$stoptime,0,Divvy_Trips_2014$duration)
+
+#drop unnecessary columns: tripduration
+Divvy_Trips_2014 <- select(Divvy_Trips_2014,-5)
+
+#add month column based on starttime
+Divvy_Trips_2014$MonthYear = format_ISO8601(Divvy_Trips_2014$starttime, precision = "ym")
+
+#summary statistic table
+Divvy_Trips_2014_Summary <- Divvy_Trips_2014 %>%
+  group_by (usertype,MonthYear) %>%
+  summarize(number_of_trip = n_distinct(trip_id),
+            total_duration = sum(duration),
+            median_duration = median(duration),
+            max_duration = max(duration),
+            min_duration = min(duration)
+            )
+
+Divvy_Trips_2014_Summary$Average = Divvy_Trips_2014_Summary$total_duration / Divvy_Trips_2014_Summary$number_of_trip
+
+#linechart by months by customer groups
+ggplot(Divvy_Trips_2014_Summary,aes(x=MonthYear, y = median_duration, group = usertype, color = usertype )) + 
+  geom_line()
+ggplot(Divvy_Trips_2014_Summary,aes(x=MonthYear, y = number_of_trip, group = usertype, color = usertype )) + 
+  geom_line()
+ggplot(Divvy_Trips_2014_Summary,aes(x=MonthYear, y = total_duration, group = usertype, color = usertype )) + 
+  geom_line()
+
+#most busiest station
+Divvy_Trips_2014_StartStation <- Divvy_Trips_2014 %>%
+  group_by(from_station_name) %>%
+  summarize(number_of_trip = n_distinct(trip_id)
+            )
+Divvy_Trips_2014_StartStation <- Divvy_Trips_2014_StartStation[order(-Divvy_Trips_2014_StartStation$number_of_trip),]
+
+
+Divvy_Trips_2014_StopStation <- Divvy_Trips_2014 %>%
+  group_by(to_station_name) %>%
+  summarize(number_of_trip = n_distinct(trip_id)
+  )
+
+Divvy_Trips_2014_StopStation <- Divvy_Trips_2014_StopStation[order(-Divvy_Trips_2014_StopStation$number_of_trip),]
+
+#most popular route
+Divvy_Trips_2014$route <- str_c(Divvy_Trips_2014$from_station_name," to ",Divvy_Trips_2014$to_station_name)
+
+Divvy_Trips_2014_PopularRoute <- Divvy_Trips_2014 %>%
+  group_by(route) %>%
+  summarize(number_of_trip = n_distinct(trip_id)
+  )
+
+Divvy_Trips_2014_PopularRoute <- Divvy_Trips_2014_PopularRoute[order(-Divvy_Trips_2014_PopularRoute$number_of_trip),]
+
+#time classification based on start time
+Divvy_Trips_2014$StartTimeOnly <- format(as.POSIXct(Divvy_Trips_2014$starttime), format = "%H:%M")
+
+Divvy_Trips_2014$StartTimePeriod <- ifelse(
+  (as.POSIXct(Divvy_Trips_2014$StartTimeOnly,format = "%H:%M") < as.POSIXct("12:00", format = "%H:%M")),
+  "Morning",
+    ifelse(as.POSIXct(Divvy_Trips_2014$StartTimeOnly,format = "%H:%M") < as.POSIXct("18:00", format = "%H:%M"),
+  "Afternoon",
+  "Night"
+  ))
+
+#most popular time period
+Divvy_Trips_2014_PopularPeriod <- Divvy_Trips_2014 %>%
+  group_by(StartTimePeriod) %>%
+  summarize(number_of_trip = n_distinct(trip_id)
+  )
+
+Divvy_Trips_2014_PopularPeriod <- Divvy_Trips_2014_PopularPeriod[order(-Divvy_Trips_2014_PopularPeriod$number_of_trip),]
